@@ -5,36 +5,39 @@
 #include <algorithm>
 #include <cctype>
 #include <nlohmann/json.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 
 using json = nlohmann::json;
+using BigInt = boost::multiprecision::cpp_int;
 
-// Convert a string in any base (2–16) into decimal (as long long).
-// Works fine for smaller inputs (testcase1). 
-// For very large numbers (testcase2), you’d need big integer support.
-long long safeConvertToDecimal(const std::string &value, int base) {
-    long long result = 0;
+// Convert a string in any base (2-16) to a BigInt.
+// boost::multiprecision::cpp_int is heap-allocated and grows as
+// needed, so 21-digit base-6 inputs no longer overflow.
+BigInt convertToDecimal(const std::string &value, int base) {
+    BigInt result = 0;
+    BigInt b = base;
     for (char c : value) {
         int digit;
         if (std::isdigit(c)) digit = c - '0';
         else digit = 10 + (std::tolower(c) - 'a');
-        result = result * base + digit;
+        result = result * b + digit;
     }
     return result;
 }
 
-// Multiply polynomial by (x - root)
-std::vector<long long> multiplyPoly(const std::vector<long long> &poly, long long root) {
-    std::vector<long long> result(poly.size() + 1, 0);
+// Multiply polynomial by (x - root). Coefficients are BigInt because
+// the product of many large roots overflows even __int128.
+std::vector<BigInt> multiplyPoly(const std::vector<BigInt> &poly, const BigInt &root) {
+    std::vector<BigInt> result(poly.size() + 1, 0);
 
     for (size_t i = 0; i < poly.size(); i++) {
-        result[i + 1] += poly[i];         // ✅ Multiply by x: shift up
-        result[i] -= root * poly[i];      // ✅ Multiply by -root
+        result[i + 1] += poly[i];        // multiply by x: shift up
+        result[i] -= root * poly[i];     // multiply by -root
     }
     return result;
 }
 
 int main(int argc, char* argv[]) {
-    // Expect JSON filename from command line
     if (argc < 2) {
         std::cerr << "Usage: ./main <json_file>" << std::endl;
         return 1;
@@ -53,25 +56,24 @@ int main(int argc, char* argv[]) {
     int k = data["keys"]["k"];
 
     // Collect roots (only first k roots are needed)
-    std::vector<long long> roots;
+    std::vector<BigInt> roots;
     for (int i = 1; i <= n && (int)roots.size() < k; i++) {
         if (data.contains(std::to_string(i))) {
             int base = std::stoi(data[std::to_string(i)]["base"].get<std::string>());
             std::string value = data[std::to_string(i)]["value"];
-            long long root = safeConvertToDecimal(value, base);
-            roots.push_back(root);
+            roots.push_back(convertToDecimal(value, base));
         }
     }
 
     // Build polynomial coefficients
-    std::vector<long long> poly = {1}; // start with 1
-    for (long long root : roots) {
+    std::vector<BigInt> poly = {1};
+    for (const BigInt &root : roots) {
         poly = multiplyPoly(poly, root);
     }
 
     // Print coefficients
     std::cout << "Polynomial coefficients: ";
-    for (long long coeff : poly) {
+    for (const BigInt &coeff : poly) {
         std::cout << coeff << " ";
     }
     std::cout << std::endl;
